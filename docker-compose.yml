@@ -1,0 +1,153 @@
+x-common-env: &common-env
+  AMQP_URL: ${AMQP_URL:-amqp://guest:guest@rabbitmq:5672/}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+  POSTGRES_DSN: ${POSTGRES_DSN:-postgresql://atc:atc_secret@postgres:5432/atc_db}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+services:
+  # ── Infrastructure ───────────────────────────────────
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-guest}
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-atc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-atc_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-atc_db}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atc -d atc_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── Application Services ─────────────────────────────
+
+  radar:
+    build:
+      context: .
+      dockerfile: services/radar/Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      <<: *common-env
+      RADAR_INTERVAL: ${RADAR_INTERVAL:-2}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  sector-a:
+    build:
+      context: .
+      dockerfile: services/sector/Dockerfile
+    ports:
+      - "8002:8002"
+    environment:
+      <<: *common-env
+      SECTOR_ID: SECTOR_A
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  sector-b:
+    build:
+      context: .
+      dockerfile: services/sector/Dockerfile
+    ports:
+      - "8012:8002"
+    environment:
+      <<: *common-env
+      SECTOR_ID: SECTOR_B
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  runway:
+    build:
+      context: .
+      dockerfile: services/runway/Dockerfile
+    ports:
+      - "8003:8003"
+    environment:
+      <<: *common-env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  conflict:
+    build:
+      context: .
+      dockerfile: services/conflict/Dockerfile
+    ports:
+      - "8004:8004"
+    environment:
+      <<: *common-env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  gateway:
+    build:
+      context: .
+      dockerfile: services/gateway/Dockerfile
+    ports:
+      - "8005:8005"
+    environment:
+      <<: *common-env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  logging-svc:
+    build:
+      context: .
+      dockerfile: services/logging/Dockerfile
+    ports:
+      - "8006:8006"
+    environment:
+      <<: *common-env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:

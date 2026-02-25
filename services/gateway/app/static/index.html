@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YYZ Air Traffic Control</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0a0e1a; color: #c8d6e5; }
+
+    /* ── Layout ─────────────────────────────────── */
+    .container { display: flex; height: 100vh; }
+    #map { flex: 1; z-index: 0; }
+    .sidebar { width: 380px; min-width: 260px; max-width: 700px; background: #0f1425;
+               border-left: 1px solid #1e2a40; display: flex; flex-direction: column;
+               overflow: hidden; position: relative; }
+
+    /* ── Resize handles ────────────────────────── */
+    .sidebar-resize { position: absolute; left: 0; top: 0; bottom: 0; width: 5px;
+                      cursor: col-resize; z-index: 10; background: transparent; }
+    .sidebar-resize:hover, .sidebar-resize.active { background: #00d4ff55; }
+    .log-resize { height: 5px; cursor: row-resize; background: #1e2a40; flex-shrink: 0;
+                  transition: background .15s; }
+    .log-resize:hover, .log-resize.active { background: #00d4ff55; }
+
+    /* ── Header ─────────────────────────────────── */
+    .header { padding: 16px; border-bottom: 1px solid #1e2a40; text-align: center; position: relative; }
+    .header h1 { font-size: 18px; color: #00d4ff; letter-spacing: 1px; margin-bottom: 4px; }
+    .header .sub { font-size: 11px; color: #556; }
+    .reset-btn { position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+                 width: 34px; height: 34px; border-radius: 50%; border: 1px solid #1e2a40;
+                 background: #151c30; color: #00d4ff; cursor: pointer; display: flex;
+                 align-items: center; justify-content: center; transition: all .2s; }
+    .reset-btn:hover { background: #1e2a40; border-color: #00d4ff; }
+    .reset-btn:active { transform: translateY(-50%) scale(0.92); }
+    .reset-btn.spinning svg { animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+                  margin-right: 6px; vertical-align: middle; }
+    .status-dot.on { background: #00ff88; box-shadow: 0 0 6px #00ff88; }
+    .status-dot.off { background: #ff4444; }
+
+    /* ── Stats bar ──────────────────────────────── */
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 12px 16px;
+             border-bottom: 1px solid #1e2a40; }
+    .stat { text-align: center; }
+    .stat .val { font-size: 22px; font-weight: 700; color: #00d4ff; }
+    .stat .lbl { font-size: 10px; color: #556; text-transform: uppercase; letter-spacing: .5px; }
+    .stat.alert .val { color: #ff4444; }
+
+    /* ── Aircraft list ──────────────────────────── */
+    .section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+                     color: #445; padding: 10px 16px 4px; }
+    .ac-list { flex: 1; overflow-y: auto; padding: 0 12px; }
+    .ac-card { background: #151c30; border: 1px solid #1e2a40; border-radius: 6px;
+               padding: 10px 12px; margin-bottom: 8px; transition: border-color .2s; cursor: pointer; }
+    .ac-card:hover { border-color: #00d4ff44; }
+    .ac-card .top-row { display: flex; align-items: center; justify-content: space-between; }
+    .ac-card .callsign { font-size: 14px; font-weight: 700; color: #fff; }
+    .ac-card .id { font-size: 10px; color: #556; margin-left: 6px; font-family: monospace; }
+    .ac-card .badge { font-size: 9px; padding: 2px 6px; border-radius: 3px; font-weight: 600; }
+    .badge-air { background: #064e3b; color: #34d399; }
+    .badge-gnd { background: #451a03; color: #fb923c; }
+    .badge-conflict { background: #450a0a; color: #f87171; }
+    .badge-holding { background: #1e1b4b; color: #a78bfa; }
+    .badge-approach { background: #172554; color: #60a5fa; }
+    .badge-final { background: #422006; color: #fbbf24; }
+    .badge-takeoff { background: #052e16; color: #4ade80; }
+    .badge-climbing { background: #052e16; color: #86efac; }
+    .badge-departed { background: #1c1917; color: #a8a29e; }
+    .badge-landed { background: #1c1917; color: #a8a29e; }
+    .ac-card .details { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px;
+                        margin-top: 6px; font-size: 11px; }
+    .ac-card .details span { color: #889; }
+    .ac-card .details strong { color: #aab; }
+    .ac-card.conflict { border-color: #ff4444; background: #1a1018; }
+
+    /* ── Event log ──────────────────────────────── */
+    .log-section { height: 200px; min-height: 60px; max-height: 80vh;
+                   border-top: 1px solid #1e2a40; display: flex; flex-direction: column; }
+    .log-section .section-title { flex-shrink: 0; display: flex; align-items: center;
+                                    justify-content: space-between; padding-right: 12px; }
+    .log-toggle { font-size: 10px; color: #556; cursor: pointer; padding: 2px 8px;
+                  border: 1px solid #1e2a40; border-radius: 3px; background: #151c30;
+                  transition: all .15s; letter-spacing: 0; text-transform: none; }
+    .log-toggle:hover { border-color: #00d4ff66; color: #88a; }
+    .log-toggle.active { border-color: #4ade80; color: #4ade80; }
+    #log.hide-pos .log-entry.log-pos { display: none; }
+    #log { flex: 1; overflow-y: auto; padding: 0 12px 8px; font-family: 'Courier New', monospace;
+           font-size: 11px; line-height: 1.5; }
+    .log-entry { padding: 2px 0; border-bottom: 1px solid #111827; }
+    .log-pos { color: #4ade80; }
+    .log-conflict { color: #f87171; font-weight: bold; }
+    .log-runway { color: #fbbf24; }
+    .log-handoff { color: #a78bfa; }
+
+    /* ── Leaflet overrides ──────────────────────── */
+    .aircraft-label { background: none !important; border: none !important;
+                      color: #fff; font-size: 11px; font-weight: 700; white-space: nowrap;
+                      text-shadow: 0 0 4px #000, 0 0 2px #000; }
+    .leaflet-popup-content-wrapper { background: #151c30; color: #c8d6e5; border: 1px solid #1e2a40;
+                                     border-radius: 8px; }
+    .leaflet-popup-content { margin: 10px 14px; font-size: 12px; line-height: 1.6; }
+    .leaflet-popup-tip { background: #151c30; }
+    .conflict-line { stroke: #ff4444; stroke-dasharray: 8 4; animation: dash 0.5s linear infinite; }
+    @keyframes dash { to { stroke-dashoffset: -12; } }
+  </style>
+</head>
+<body>
+<div class="container">
+  <div id="map"></div>
+  <div class="sidebar" id="sidebar">
+    <div class="sidebar-resize" id="sidebar-resize"></div>
+    <div class="header">
+      <h1>YYZ TERMINAL CONTROL</h1>
+      <div class="sub"><span class="status-dot off" id="ws-dot"></span><span id="ws-status">Connecting...</span></div>
+      <button class="reset-btn" id="reset-btn" title="Restart simulation">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 4 23 10 17 10"></polyline>
+          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+        </svg>
+      </button>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="val" id="s-events">0</div><div class="lbl">Events</div></div>
+      <div class="stat"><div class="val" id="s-aircraft">0</div><div class="lbl">Aircraft</div></div>
+      <div class="stat alert"><div class="val" id="s-conflicts">0</div><div class="lbl">Conflicts</div></div>
+      <div class="stat"><div class="val" id="s-runway">0</div><div class="lbl">Runway Ops</div></div>
+    </div>
+    <div class="section-title">Active Aircraft</div>
+    <div class="ac-list" id="ac-list"></div>
+    <div class="log-resize" id="log-resize"></div>
+    <div class="log-section" id="log-section">
+      <div class="section-title">
+        <span>Event Log</span>
+        <button class="log-toggle" id="log-pos-toggle" title="Toggle position events">Hide Positions</button>
+      </div>
+      <div id="log"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Map Setup ──────────────────────────────────────
+const YYZ = [43.6772, -79.6306];
+const map = L.map('map', { center: [43.65, -79.45], zoom: 12, zoomControl: true });
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 18,
+}).addTo(map);
+
+// ── Sector Boundaries ──────────────────────────────
+const sectorStyle = (color) => ({ color, weight: 2, fillColor: color, fillOpacity: 0.06, dashArray: '6 4' });
+
+L.rectangle([[43.5, -79.7], [43.8, -79.45]], sectorStyle('#00d4ff')).addTo(map)
+  .bindTooltip('SECTOR A', { permanent: true, direction: 'center', className: 'aircraft-label', offset: [0, -40] });
+
+L.rectangle([[43.5, -79.45], [43.8, -79.2]], sectorStyle('#a78bfa')).addTo(map)
+  .bindTooltip('SECTOR B', { permanent: true, direction: 'center', className: 'aircraft-label', offset: [0, -40] });
+
+// ── YYZ Runways (coordinates from OurAirports) ──────
+const rwStyle = { color: '#fbbf24', weight: 4, opacity: 0.8 };
+L.polyline([[43.6739, -79.6639], [43.6947, -79.6333]], rwStyle).addTo(map)
+  .bindTooltip('RWY 05/23', { permanent: true, direction: 'top', className: 'aircraft-label', offset: [0, -8] });
+L.polyline([[43.6610, -79.6234], [43.6790, -79.5974]], rwStyle).addTo(map)
+  .bindTooltip('RWY 06L/24R', { permanent: true, direction: 'bottom', className: 'aircraft-label', offset: [0, 8] });
+L.polyline([[43.6583, -79.6219], [43.6753, -79.5972]], rwStyle).addTo(map)
+  .bindTooltip('RWY 06R/24L', { permanent: true, direction: 'bottom', className: 'aircraft-label', offset: [0, 8] });
+L.polyline([[43.6919, -79.6422], [43.6700, -79.6139]], rwStyle).addTo(map)
+  .bindTooltip('RWY 15L/33R', { permanent: true, direction: 'right', className: 'aircraft-label' });
+L.polyline([[43.6858, -79.6517], [43.6675, -79.6283]], rwStyle).addTo(map)
+  .bindTooltip('RWY 15R/33L', { permanent: true, direction: 'left', className: 'aircraft-label' });
+
+L.circleMarker(YYZ, { radius: 6, color: '#fbbf24', fillColor: '#fbbf24', fillOpacity: 1 }).addTo(map)
+  .bindPopup('<strong>YYZ</strong><br>Toronto Pearson International');
+
+// ── Dynamic Color Assignment ───────────────────────
+const COLOR_PALETTE = [
+  '#00ff88','#00d4ff','#ff88ff','#ffaa00','#ff6b6b','#48dbfb','#feca57','#ff9ff3',
+  '#54a0ff','#5f27cd','#01a3a4','#f368e0','#ff6348','#7bed9f','#70a1ff','#eccc68',
+  '#a29bfe','#fd79a8','#00cec9','#e17055','#6c5ce7','#fdcb6e','#e84393','#00b894',
+];
+const colorMap = {};
+let colorIdx = 0;
+
+function getColor(id) {
+  if (!colorMap[id]) {
+    colorMap[id] = COLOR_PALETTE[colorIdx % COLOR_PALETTE.length];
+    colorIdx++;
+  }
+  return colorMap[id];
+}
+
+// ── Aircraft Icon ──────────────────────────────────
+function createAircraftIcon(heading, color, onGround) {
+  const opacity = onGround ? 0.5 : 0.95;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+    <g transform="rotate(${heading || 0}, 16, 16)">
+      <path d="M16 4 L13 18 L6 22 L7 24 L13 21 L14 27 L11 29 L11 31 L16 30 L21 31 L21 29 L18 27 L19 21 L25 24 L26 22 L19 18 Z"
+            fill="${color}" stroke="#000" stroke-width="0.5" opacity="${opacity}"/>
+    </g>
+  </svg>`;
+  return L.divIcon({ html: svg, iconSize: [32, 32], iconAnchor: [16, 16], className: '' });
+}
+
+// ── State ──────────────────────────────────────────
+const markers = {}, trails = {}, acData = {}, conflictLines = {};
+const lastSeen = {};  // aircraft_id -> timestamp for stale removal
+let eventCount = 0, conflictCount = 0, runwayCount = 0;
+
+function getOrCreateMarker(id, lat, lon, heading, onGround) {
+  const color = getColor(id);
+  if (!markers[id]) {
+    markers[id] = L.marker([lat, lon], { icon: createAircraftIcon(heading, color, onGround) }).addTo(map);
+    trails[id] = L.polyline([], { color, weight: 1.5, opacity: 0.4 }).addTo(map);
+  }
+  return markers[id];
+}
+
+function removeStaleAircraft() {
+  const now = Date.now();
+  for (const id of Object.keys(lastSeen)) {
+    if (now - lastSeen[id] > 60000) { // 60s with no update
+      if (markers[id]) { map.removeLayer(markers[id]); delete markers[id]; }
+      if (trails[id]) { map.removeLayer(trails[id]); delete trails[id]; }
+      delete acData[id]; delete lastSeen[id]; delete colorMap[id];
+    }
+  }
+}
+setInterval(removeStaleAircraft, 15000);
+
+// ── Sidebar Rendering ──────────────────────────────
+const acListEl = document.getElementById('ac-list');
+
+function renderAircraftCards() {
+  const sorted = Object.entries(acData).sort((a, b) => {
+    // Conflicts first, then by altitude descending
+    if (a[1]._conflict !== b[1]._conflict) return b[1]._conflict ? 1 : -1;
+    return (b[1].altitude || 0) - (a[1].altitude || 0);
+  });
+
+  acListEl.innerHTML = '';
+  for (const [id, d] of sorted) {
+    const isConflict = d._conflict;
+    const onGround = d.on_ground;
+    const color = getColor(id);
+    const vr = d.vertical_rate;
+    const vrArrow = vr > 100 ? ' ↑' : vr < -100 ? ' ↓' : '';
+    const vrColor = vr > 100 ? '#34d399' : vr < -100 ? '#fb923c' : '#aab';
+
+    const phase = d.phase || '';
+    const PHASE_BADGES = {
+      holding: ['badge-holding', 'HOLDING'], approach: ['badge-approach', 'APPROACH'],
+      final: ['badge-final', 'FINAL'], landed: ['badge-landed', 'LANDED'],
+      taxi: ['badge-gnd', 'TAXI'], takeoff_roll: ['badge-takeoff', 'TAKEOFF'],
+      climbing: ['badge-climbing', 'CLIMBING'], departed: ['badge-departed', 'DEPARTED'],
+    };
+    let [badgeClass, badgeText] = PHASE_BADGES[phase] || (onGround ? ['badge-gnd','GND'] : ['badge-air','AIR']);
+    if (isConflict) { badgeClass = 'badge-conflict'; badgeText = 'CONFLICT'; }
+
+    const card = document.createElement('div');
+    card.className = 'ac-card' + (isConflict ? ' conflict' : '');
+    card.innerHTML = `
+      <div class="top-row">
+        <div><span class="callsign" style="color:${color}">${d.callsign || id}</span><span class="id">${id}</span></div>
+        <span class="badge ${badgeClass}">${badgeText}</span>
+      </div>
+      <div class="details">
+        <div><span>ALT</span><br><strong>${d.altitude?.toLocaleString() || '—'} ft</strong></div>
+        <div><span>SPD</span><br><strong>${d.speed || '—'} kts</strong></div>
+        <div><span>HDG</span><br><strong>${Math.round(d.heading || 0)}°</strong></div>
+        <div><span>LAT</span><br><strong>${d.lat?.toFixed(4) || '—'}</strong></div>
+        <div><span>LON</span><br><strong>${d.lon?.toFixed(4) || '—'}</strong></div>
+        <div><span>V/S</span><br><strong style="color:${vrColor}">${vr ? Math.round(vr) : '—'}${vrArrow}</strong></div>
+      </div>`;
+    card.addEventListener('click', () => {
+      if (d.lat && d.lon) map.flyTo([d.lat, d.lon], 14, { duration: 0.5 });
+    });
+    acListEl.appendChild(card);
+  }
+}
+
+// ── Log ────────────────────────────────────────────
+const logEl = document.getElementById('log');
+function addLog(event) {
+  let cls = 'log-pos';
+  if (event.type === 'conflict.alert') cls = 'log-conflict';
+  else if (event.type === 'runway.assigned') cls = 'log-runway';
+  else if (event.type?.includes('handoff')) cls = 'log-handoff';
+
+  const div = document.createElement('div');
+  div.className = `log-entry ${cls}`;
+  const ts = event.timestamp?.substring(11, 19) || '';
+  const info = event.type === 'aircraft.position'
+    ? `${event.data?.callsign || event.aircraft_id} → ${event.data?.lat?.toFixed(4)}, ${event.data?.lon?.toFixed(4)} @ ${event.data?.altitude} ft`
+    : JSON.stringify(event.data);
+  div.textContent = `[${ts}] ${event.type} | ${info}`;
+  logEl.prepend(div);
+  while (logEl.children.length > 200) logEl.removeChild(logEl.lastChild);
+}
+
+// ── Conflict Visualization ─────────────────────────
+function showConflict(idA, idB, dataA, dataB) {
+  const key = [idA, idB].sort().join('-');
+  if (conflictLines[key]) map.removeLayer(conflictLines[key]);
+  conflictLines[key] = L.polyline(
+    [[dataA.lat, dataA.lon], [dataB.lat, dataB.lon]],
+    { color: '#ff4444', weight: 2, dashArray: '8 4', className: 'conflict-line' }
+  ).addTo(map);
+  setTimeout(() => {
+    if (conflictLines[key]) { map.removeLayer(conflictLines[key]); delete conflictLines[key]; }
+  }, 6000);
+}
+
+// ── Stats ──────────────────────────────────────────
+function updateStats() {
+  document.getElementById('s-events').textContent = eventCount;
+  document.getElementById('s-aircraft').textContent = Object.keys(acData).length;
+  document.getElementById('s-conflicts').textContent = conflictCount;
+  document.getElementById('s-runway').textContent = runwayCount;
+}
+
+// ── WebSocket ──────────────────────────────────────
+function connect() {
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+  const dot = document.getElementById('ws-dot');
+  const statusEl = document.getElementById('ws-status');
+
+  ws.onopen = () => { dot.className = 'status-dot on'; statusEl.textContent = 'Live'; };
+  ws.onclose = () => { dot.className = 'status-dot off'; statusEl.textContent = 'Reconnecting...'; setTimeout(connect, 2000); };
+
+  ws.onmessage = (msg) => {
+    const event = JSON.parse(msg.data);
+    eventCount++;
+
+    if (event.type === 'aircraft.position') {
+      const d = event.data;
+      const id = event.aircraft_id;
+      const phase = d.phase || '';
+      const onGround = d.on_ground || false;
+
+      // Aircraft reached terminal state — remove from map and stop tracking
+      if (phase === 'landed' || phase === 'departed') {
+        if (markers[id]) { map.removeLayer(markers[id]); delete markers[id]; }
+        if (trails[id]) { map.removeLayer(trails[id]); delete trails[id]; }
+        delete acData[id]; delete lastSeen[id];
+        renderAircraftCards();
+        addLog(event);
+        updateStats();
+        return;
+      }
+
+      if (acData[id]) acData[id]._conflict = false;
+      acData[id] = { ...d, _conflict: false };
+      lastSeen[id] = Date.now();
+
+      const color = getColor(id);
+      const m = getOrCreateMarker(id, d.lat, d.lon, d.heading, onGround);
+      m.setLatLng([d.lat, d.lon]);
+      m.setIcon(createAircraftIcon(d.heading, color, onGround));
+
+      const vrText = d.vertical_rate ? `<br>V/S: ${Math.round(d.vertical_rate)} ft/min` : '';
+      const gndText = onGround ? '<br><em style="color:#fb923c">ON GROUND</em>' : '';
+      m.bindPopup(`<strong>${d.callsign || id}</strong><br>Alt: ${d.altitude?.toLocaleString()} ft<br>Spd: ${d.speed} kts<br>Hdg: ${Math.round(d.heading || 0)}°${vrText}${gndText}`);
+
+      // Trail (skip if on ground to avoid clutter)
+      if (!onGround) {
+        const trail = trails[id];
+        trail.addLatLng([d.lat, d.lon]);
+        const pts = trail.getLatLngs();
+        if (pts.length > 60) trail.setLatLngs(pts.slice(-60));
+      }
+
+      renderAircraftCards();
+    }
+
+    else if (event.type === 'conflict.alert') {
+      conflictCount++;
+      const a = event.data.aircraft_a;
+      const b = event.data.aircraft_b;
+      if (acData[a?.id]) acData[a.id]._conflict = true;
+      if (acData[b?.id]) acData[b.id]._conflict = true;
+      if (a && b) showConflict(a.id, b.id, a, b);
+      renderAircraftCards();
+    }
+
+    else if (event.type === 'runway.assigned') {
+      runwayCount++;
+    }
+
+    addLog(event);
+    updateStats();
+  };
+}
+
+// ── Resizable Sidebar (width) ───────────────────────
+(function () {
+  const sidebar = document.getElementById('sidebar');
+  const handle = document.getElementById('sidebar-resize');
+  let dragging = false;
+
+  handle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    dragging = true;
+    handle.classList.add('active');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const newWidth = document.documentElement.clientWidth - e.clientX;
+    const clamped = Math.min(700, Math.max(260, newWidth));
+    sidebar.style.width = clamped + 'px';
+    map.invalidateSize();
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    handle.classList.remove('active');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    map.invalidateSize();
+  });
+})();
+
+// ── Resizable Event Log (height) ────────────────────
+(function () {
+  const logSection = document.getElementById('log-section');
+  const handle = document.getElementById('log-resize');
+  let dragging = false;
+  let startY, startH;
+
+  handle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    dragging = true;
+    startY = e.clientY;
+    startH = logSection.offsetHeight;
+    handle.classList.add('active');
+    document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const delta = startY - e.clientY;
+    const newH = Math.min(window.innerHeight * 0.8, Math.max(60, startH + delta));
+    logSection.style.height = newH + 'px';
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    handle.classList.remove('active');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  });
+})();
+
+// ── Log Position Filter ─────────────────────────────
+document.getElementById('log-pos-toggle').addEventListener('click', function () {
+  const log = document.getElementById('log');
+  log.classList.toggle('hide-pos');
+  const hidden = log.classList.contains('hide-pos');
+  this.textContent = hidden ? 'Show Positions' : 'Hide Positions';
+  this.classList.toggle('active', hidden);
+});
+
+// ── Reset Button ────────────────────────────────────
+document.getElementById('reset-btn').addEventListener('click', async function () {
+  const btn = this;
+  if (btn.classList.contains('spinning')) return;
+  btn.classList.add('spinning');
+
+  try {
+    const res = await fetch('/api/reset', { method: 'POST' });
+    if (!res.ok) throw new Error(res.statusText);
+
+    // Clear frontend state
+    for (const id of Object.keys(markers)) { map.removeLayer(markers[id]); delete markers[id]; }
+    for (const id of Object.keys(trails)) { map.removeLayer(trails[id]); delete trails[id]; }
+    for (const key of Object.keys(conflictLines)) { map.removeLayer(conflictLines[key]); delete conflictLines[key]; }
+    for (const id of Object.keys(acData)) delete acData[id];
+    for (const id of Object.keys(lastSeen)) delete lastSeen[id];
+    for (const id of Object.keys(colorMap)) delete colorMap[id];
+    colorIdx = 0;
+    eventCount = 0; conflictCount = 0; runwayCount = 0;
+    logEl.innerHTML = '';
+    renderAircraftCards();
+    updateStats();
+  } catch (e) {
+    console.error('Reset failed:', e);
+  } finally {
+    setTimeout(() => btn.classList.remove('spinning'), 600);
+  }
+});
+
+connect();
+</script>
+</body>
+</html>
