@@ -294,9 +294,18 @@ function addLog(event) {
   const div = document.createElement('div');
   div.className = `log-entry ${cls}`;
   const ts = event.timestamp?.substring(11, 19) || '';
-  const info = event.type === 'aircraft.position'
-    ? `${event.data?.callsign || event.aircraft_id} → ${event.data?.lat?.toFixed(4)}, ${event.data?.lon?.toFixed(4)} @ ${event.data?.altitude} ft`
-    : JSON.stringify(event.data);
+  let info;
+  if (event.type === 'aircraft.position') {
+    info = `${event.data?.callsign || event.aircraft_id} → ${event.data?.lat?.toFixed(4)}, ${event.data?.lon?.toFixed(4)} @ ${event.data?.altitude} ft`;
+  } else if (event.type === 'runway.assigned') {
+    info = `${event.aircraft_id} → ${event.data?.runway_id} (${event.data?.operation}) at ${event.data?.airport_id}`;
+  } else if (event.type === 'conflict.alert') {
+    info = `${event.data?.aircraft_a?.id} ↔ ${event.data?.aircraft_b?.id} — separation violation`;
+  } else if (event.type?.includes('handoff')) {
+    info = `${event.aircraft_id} — ${event.data?.from_sector} → ${event.data?.to_sector}`;
+  } else {
+    info = JSON.stringify(event.data);
+  }
   div.textContent = `[${ts}] ${event.type} | ${info}`;
   logEl.prepend(div);
   while (logEl.children.length > 200) logEl.removeChild(logEl.lastChild);

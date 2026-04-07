@@ -30,3 +30,11 @@ async def start_consumers(
         channel, exchange, "gateway.runway",
         RoutingKeys.RUNWAY_ASSIGNED, on_event,
     )
+    await subscribe(
+        channel, exchange, "gateway.handoff_req",
+        RoutingKeys.HANDOFF_REQUEST, on_event,
+    )
+    await subscribe(
+        channel, exchange, "gateway.handoff_acc",
+        RoutingKeys.HANDOFF_ACCEPTED, on_event,
+    )

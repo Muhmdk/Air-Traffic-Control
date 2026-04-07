@@ -12,7 +12,7 @@ from aio_pika.abc import AbstractExchange
 from shared.events import ATCEvent, RoutingKeys
 from shared.rabbitmq import publish
 
-from app.domain.aircraft import ARRIVING_AIRCRAFT, DEPARTING_AIRCRAFT, Phase, SimAircraft
+from app.domain.aircraft import ARRIVING_AIRCRAFT, ARRIVING_AIRCRAFT_B, DEPARTING_AIRCRAFT, Phase, SimAircraft
 from app.services.position_updater import tick
 
 logger = logging.getLogger(__name__)
@@ -21,10 +21,11 @@ BROADCAST_INTERVAL = float(os.getenv("RADAR_INTERVAL", "2"))
 
 
 def _fresh_aircraft() -> dict[str, SimAircraft]:
-    """Return a fresh copy of both aircraft at initial state."""
+    """Return a fresh copy of all aircraft at initial state."""
     return {
         DEPARTING_AIRCRAFT.aircraft_id: DEPARTING_AIRCRAFT.model_copy(),
         ARRIVING_AIRCRAFT.aircraft_id: ARRIVING_AIRCRAFT.model_copy(),
+        ARRIVING_AIRCRAFT_B.aircraft_id: ARRIVING_AIRCRAFT_B.model_copy(),
     }
 
 
@@ -36,9 +37,10 @@ async def start_broadcasting(
     aircraft = _fresh_aircraft()
 
     logger.info(
-        "Radar simulation started – %s (departing) + %s (arriving) – interval %.1fs",
+        "Radar simulation started – %s (departing) + %s (arriving) + %s (arriving Sector B) – interval %.1fs",
         DEPARTING_AIRCRAFT.callsign,
         ARRIVING_AIRCRAFT.callsign,
+        ARRIVING_AIRCRAFT_B.callsign,
         BROADCAST_INTERVAL,
     )
 

@@ -105,7 +105,7 @@ def tick(ac: SimAircraft, has_clearance: bool, runway_id: str | None = None) -> 
 
     # ── Arriving aircraft ──────────────────────────────────
     if ac.phase == Phase.HOLDING:
-        lat, lon, alt, hdg, spd = holding_position(ac.phase_tick)
+        lat, lon, alt, hdg, spd = holding_position(ac.phase_tick, center=ac.holding_center)
         ac = ac.model_copy(update={
             "lat": lat, "lon": lon, "altitude": alt, "heading": hdg, "speed": spd,
         })

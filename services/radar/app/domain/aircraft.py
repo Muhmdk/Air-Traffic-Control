@@ -33,6 +33,7 @@ class SimAircraft(BaseModel):
     heading: float
     speed: float
     phase_tick: int = 0  # ticks spent in current phase
+    holding_center: tuple[float, float] | None = None  # custom hold center
 
 
 # ── Waypoint paths ──────────────────────────────────────────
@@ -72,6 +73,19 @@ APPROACH_PATHS: dict[str, list[tuple[float, float, float, float, int]]] = {
         (43.6640, -79.6140,    0,   80,  4),   # touchdown + decelerate
         (43.6700, -79.6050,    0,   20,  6),   # roll-out toward 24L end
     ],
+    # RWY 06L approach: starts from Sector B, crosses into Sector A for landing
+    # The sector boundary is at longitude -79.45 — handoff triggers mid-approach
+    "RWY_06L": [
+        (43.7000, -79.3600, 4500,  200,  8),   # break from holding in Sector B
+        (43.6900, -79.4200, 3800,  190,  8),   # heading west, still in Sector B
+        (43.6800, -79.4800, 3000,  180,  8),   # crossing into Sector A (handoff!)
+        (43.6700, -79.5500, 2000,  170,  8),   # descending in Sector A
+        (43.6650, -79.5900, 1200,  160,  8),   # lining up with 06L centerline
+        (43.6620, -79.6150,  500,  150,  6),   # short final for 06L
+        (43.6610, -79.6234,   50,  140,  4),   # over 06L threshold
+        (43.6670, -79.6150,    0,   80,  4),   # touchdown + decelerate
+        (43.6740, -79.6060,    0,   20,  6),   # roll-out
+    ],
 }
 
 # Fallbacks used when no runway-specific path exists
@@ -88,11 +102,15 @@ HOLDING_SPEED = 220.0
 HOLDING_ANGULAR_SPEED = 0.15  # radians per tick (~42 ticks per loop)
 
 
-def holding_position(tick: int) -> tuple[float, float, float, float, float]:
+def holding_position(
+    tick: int,
+    center: tuple[float, float] | None = None,
+) -> tuple[float, float, float, float, float]:
     """Compute position on the elliptical holding pattern. Returns (lat, lon, alt, heading, speed)."""
+    c = center or HOLDING_CENTER
     angle = tick * HOLDING_ANGULAR_SPEED
-    lat = HOLDING_CENTER[0] + HOLDING_A * math.sin(angle)
-    lon = HOLDING_CENTER[1] + HOLDING_B * math.cos(angle)
+    lat = c[0] + HOLDING_A * math.sin(angle)
+    lon = c[1] + HOLDING_B * math.cos(angle)
 
     # Heading = tangent direction of the ellipse
     dx = HOLDING_B * -math.sin(angle)
@@ -100,6 +118,12 @@ def holding_position(tick: int) -> tuple[float, float, float, float, float]:
     heading = math.degrees(math.atan2(dx, dy)) % 360
 
     return lat, lon, HOLDING_ALT, heading, HOLDING_SPEED
+
+
+# ── Second holding pattern (Sector B) ─────────────────────
+# TSC903 holds east of the sector boundary so it starts under
+# Sector B control and triggers a handoff during approach.
+HOLDING_CENTER_B = (43.70, -79.35)
 
 
 # ── Initial aircraft ────────────────────────────────────────
@@ -127,4 +151,19 @@ ARRIVING_AIRCRAFT = SimAircraft(
     altitude=HOLDING_ALT,
     heading=0,
     speed=HOLDING_SPEED,
+)
+
+# TSC903 holds in Sector B — waits for WJA512 to vacate RWY 06L,
+# then lands on 06L, crossing from Sector B → Sector A mid-approach.
+ARRIVING_AIRCRAFT_B = SimAircraft(
+    aircraft_id="TSC903",
+    callsign="TSC903",
+    phase=Phase.HOLDING,
+    intent="landing",
+    lat=HOLDING_CENTER_B[0],
+    lon=HOLDING_CENTER_B[1],
+    altitude=HOLDING_ALT,
+    heading=0,
+    speed=HOLDING_SPEED,
+    holding_center=HOLDING_CENTER_B,
 )
